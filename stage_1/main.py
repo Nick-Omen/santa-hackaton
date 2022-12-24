@@ -1,7 +1,7 @@
 import json
 import os
 import sys
-from dataclasses import dataclass, asdict
+from shapely.geometry import LineString, Point
 from datetime import datetime
 
 import requests
@@ -18,9 +18,8 @@ def get_map():
 def save_initial_map():
     map_data = get_map()
     with open("./map.json", "w+") as f:
-        map_data["gifts"] = sorted(map_data["gifts"], key=lambda v: (v["volume"], v["weight"]))
-        map_data["children"] = sorted(map_data["children"], key=lambda v: (v["x"], v["y"]))
-        del map_data["snowAreas"]
+        map_data["gifts"] = sorted(map_data["gifts"], key=lambda v: v["volume"] + v["weight"])
+        map_data["children"] = sorted(map_data["children"], key=lambda v: (v["y"], v["x"]))
         json.dump(map_data, f)
 
 
@@ -99,7 +98,7 @@ def get_children(map_data, count):
     children = []
     for _ in range(count):
         children.append(map_data["children"].pop(0))
-    return sorted(children, key=lambda v: v["y"])
+    return sorted(children, key=lambda v: (v["x"], -v["y"]))
 
 
 def read_last_map_state():
@@ -125,35 +124,96 @@ def save_map_state(state, map_data):
         json.dump(map_data, f)
 
 
-def get_iteration_state():
+def clear_cache():
+    dirs = os.listdir("./map_states/")
+    for file in dirs:
+        os.remove(f"./map_states/{file}")
+    os.remove(f"./map.json")
+
+
+def avoid_intersection(restricted_zones, line, step, current_position, steps):
+    print('====================================================')
+    print("current_position: ", current_position)
+    print("next_step: ", step)
+    intersected_zones = []
+    for zone, point in restricted_zones:
+        if zone.intersects(line):
+            intersected_zones.append((zone, point))
+
+    for zone, point in intersected_zones:
+        intersection = zone.intersection(line)
+        print("intersection: ", point)
+        print(intersection.coords)
+
+    """
+    Кароч тут надо как-то обойти ебучую зону пересечения вьюги
+    """
+
+    print('====================================================')
+
+
+def new_moves_without_intersections(restricted_zones, steps):
+    new_steps = []
+    current_coords = {"x": 0, "y": 0}
+
+    for step in steps:
+        line = LineString([
+            Point(current_coords["x"], current_coords["y"]),
+            Point(step["x"], step["y"]),
+        ])
+        if any((line.intersects(zone) for zone, point in restricted_zones)):
+            avoid_intersection(restricted_zones, line, step, current_coords, steps)
+        else:
+            new_steps.append(step)
+        current_coords = step
+    return new_steps
+
+
+def get_iteration_state(restricted_zones):
     map_data, state = read_last_map_state()
     bags = collect_bags(map_data)
     children = get_children(map_data, len(bags))
+    children.append({"x": 0, "y": 0})
+    moves = new_moves_without_intersections(restricted_zones, children)
+
     save_map_state(state + 1, map_data)
-    return bags, children
+    return bags, moves
+
+
+def get_restricted_zones():
+    map_data = read_initial_map()
+    restricted_zones = []
+    for area in map_data["snowAreas"]:
+        restricted_zones.append((Point(area["x"], area["y"]).buffer(area["r"]), area))
+    return restricted_zones
 
 
 def main():
+    clear_cache()
     stacks_of_bags = []
     stack_of_moves = []
 
-    bags, children = get_iteration_state()
+    restricted_zones = get_restricted_zones()
+    bags, iter_moves = get_iteration_state(restricted_zones)
 
-    while len(bags) > 0 and len(children) > 0:
+    while len(bags) > 0 and len(iter_moves) > 0:
         stacks_of_bags.append([bag["id"] for bag in bags])
-        stack_of_moves.append(children)
+        stack_of_moves.append(iter_moves)
 
-        bags, children = get_iteration_state()
+        bags, iter_moves = get_iteration_state(restricted_zones)
 
-    moves = []
-    for move in stack_of_moves:
-        moves += move
-        moves.append({"x": 0, "y": 0})
+    total_moves = []
+    for moves in stack_of_moves:
+        total_moves += moves
+
+    print("len(total_moves)", len(total_moves))
+
+    return
 
     res = send_route({
         "mapID": MAP_ID,
         "stackOfBags": stacks_of_bags,
-        "moves": moves,
+        "moves": total_moves,
     })
 
     if res["success"] is True:
@@ -163,7 +223,7 @@ def main():
 
 
 if __name__ == "__main__":
-    if sys.argv[1] == "check":
+    if len(sys.argv) > 1 and sys.argv[1] == "check":
         check_round_status(sys.argv[2])
     else:
         main()
