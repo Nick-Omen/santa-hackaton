@@ -71,7 +71,7 @@ def collect_bags(map_data):
     Starts with last items from array, because they are the biggest.
     """
     current_item = map_data["gifts"][len(map_data["gifts"]) - 1]
-    while total_weight + current_item["weight"] <= 180 and total_volume + current_item["volume"] <= 90:
+    while total_weight + current_item["weight"] <= 200 and total_volume + current_item["volume"] <= 100:
         item = map_data["gifts"].pop()
         taken_gifts.append(item)
         total_volume += item["volume"]
@@ -84,7 +84,7 @@ def collect_bags(map_data):
         return taken_gifts
 
     current_item = map_data["gifts"][0]
-    while total_weight + current_item["weight"] <= 180 and total_volume + current_item["volume"] <= 90:
+    while total_weight + current_item["weight"] <= 200 and total_volume + current_item["volume"] <= 100:
         item = map_data["gifts"].pop(0)
         taken_gifts.append(item)
         total_volume += item["volume"]
@@ -129,6 +129,8 @@ def save_map_state(state, map_data):
 def clear_cache():
     dirs = os.listdir("./map_states/")
     for file in dirs:
+        if file.endswith(".gitkeep"):
+            continue
         os.remove(f"./map_states/{file}")
     if os.path.exists("./map.json"):
         os.remove("./map.json")
