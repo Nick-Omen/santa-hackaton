@@ -240,7 +240,11 @@ cython_debug/
 #.idea/
 
 stage_1/map_states/*
+stage_1/images/*
+stage_1/images_small/*
 stage_1/responses/*
 stage_1/map.json
+stage_1/map.png
+stage_1/map.mp4
 
 !.gitkeep

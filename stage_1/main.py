@@ -1,10 +1,12 @@
 import json
 import os
+import random
 import sys
-from shapely.geometry import LineString, Point
 from datetime import datetime
 
 import requests
+from PIL import Image, ImageDraw
+from shapely import Point, LineString
 
 MAP_ID = "faf7ef78-41b3-4a36-8423-688a61929c08"
 TOKEN = "85972f67-7f9f-4f30-a319-119b91b3dca8"
@@ -19,7 +21,7 @@ def save_initial_map():
     map_data = get_map()
     with open("./map.json", "w+") as f:
         map_data["gifts"] = sorted(map_data["gifts"], key=lambda v: v["volume"] + v["weight"])
-        map_data["children"] = sorted(map_data["children"], key=lambda v: (v["y"], v["x"]))
+        map_data["children"] = sorted(map_data["children"], key=lambda v: (v["y"] + v["x"]))
         json.dump(map_data, f)
 
 
@@ -69,7 +71,7 @@ def collect_bags(map_data):
     Starts with last items from array, because they are the biggest.
     """
     current_item = map_data["gifts"][len(map_data["gifts"]) - 1]
-    while total_weight + current_item["weight"] <= 200 and total_volume + current_item["volume"] <= 100:
+    while total_weight + current_item["weight"] <= 180 and total_volume + current_item["volume"] <= 90:
         item = map_data["gifts"].pop()
         taken_gifts.append(item)
         total_volume += item["volume"]
@@ -82,7 +84,7 @@ def collect_bags(map_data):
         return taken_gifts
 
     current_item = map_data["gifts"][0]
-    while total_weight + current_item["weight"] < 200 and total_volume + current_item["volume"] < 100:
+    while total_weight + current_item["weight"] <= 180 and total_volume + current_item["volume"] <= 90:
         item = map_data["gifts"].pop(0)
         taken_gifts.append(item)
         total_volume += item["volume"]
@@ -128,45 +130,8 @@ def clear_cache():
     dirs = os.listdir("./map_states/")
     for file in dirs:
         os.remove(f"./map_states/{file}")
-    os.remove(f"./map.json")
-
-
-def avoid_intersection(restricted_zones, line, step, current_position, steps):
-    print('====================================================')
-    print("current_position: ", current_position)
-    print("next_step: ", step)
-    intersected_zones = []
-    for zone, point in restricted_zones:
-        if zone.intersects(line):
-            intersected_zones.append((zone, point))
-
-    for zone, point in intersected_zones:
-        intersection = zone.intersection(line)
-        print("intersection: ", point)
-        print(intersection.coords)
-
-    """
-    Кароч тут надо как-то обойти ебучую зону пересечения вьюги
-    """
-
-    print('====================================================')
-
-
-def new_moves_without_intersections(restricted_zones, steps):
-    new_steps = []
-    current_coords = {"x": 0, "y": 0}
-
-    for step in steps:
-        line = LineString([
-            Point(current_coords["x"], current_coords["y"]),
-            Point(step["x"], step["y"]),
-        ])
-        if any((line.intersects(zone) for zone, point in restricted_zones)):
-            avoid_intersection(restricted_zones, line, step, current_coords, steps)
-        else:
-            new_steps.append(step)
-        current_coords = step
-    return new_steps
+    if os.path.exists("./map.json"):
+        os.remove("./map.json")
 
 
 def get_iteration_state(restricted_zones):
@@ -174,21 +139,71 @@ def get_iteration_state(restricted_zones):
     bags = collect_bags(map_data)
     children = get_children(map_data, len(bags))
     children.append({"x": 0, "y": 0})
-    moves = new_moves_without_intersections(restricted_zones, children)
 
     save_map_state(state + 1, map_data)
-    return bags, moves
+    return list(reversed(bags)), children
 
 
 def get_restricted_zones():
     map_data = read_initial_map()
     restricted_zones = []
     for area in map_data["snowAreas"]:
-        restricted_zones.append((Point(area["x"], area["y"]).buffer(area["r"]), area))
+        restricted_zones.append(area)
     return restricted_zones
 
 
-def main():
+def save_map_images(stack_of_moves, restricted_zones):
+    image = Image.new("RGBA", (10000, 10000), color=(0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+
+    for area in restricted_zones:
+        draw.regular_polygon(
+            (area["x"], area["y"], area["r"]),
+            n_sides=360,
+            fill=(255, 255, 255, 100),
+            outline=(255, 255, 255, 255),
+        )
+
+    for moves in stack_of_moves:
+        for move in moves:
+            if move["x"] == 0 and move["y"] == 0:
+                continue
+            draw.regular_polygon(
+                (move["x"], move["y"], 10),
+                n_sides=4,
+                fill=(255, 0, 0, 255),
+            )
+
+    color = (255, 255, 255, 255)
+    last_n = 0
+
+    for n, moves in enumerate(stack_of_moves):
+        new_image = image.copy()
+        new_draw = ImageDraw.Draw(new_image)
+        for i in range(len(moves) - 1, 0, -1):
+            new_draw.line((
+                moves[i]["x"],
+                moves[i]["y"],
+                moves[i-1]["x"],
+                moves[i-1]["y"],
+            ), fill=color)
+            draw.regular_polygon(
+                (moves[i]["x"], moves[i]["y"], 10),
+                n_sides=4,
+                fill=(0, 255, 0, 255),
+            )
+        draw.regular_polygon(
+            (moves[0]["x"], moves[0]["y"], 10),
+            n_sides=4,
+            fill=(0, 255, 0, 255),
+        )
+        new_image.save(f"./images/map-{n}.png")
+        last_n = n
+
+    image.save(f"./images/map-{last_n}.png")
+
+
+def main(with_output=False):
     clear_cache()
     stacks_of_bags = []
     stack_of_moves = []
@@ -197,18 +212,17 @@ def main():
     bags, iter_moves = get_iteration_state(restricted_zones)
 
     while len(bags) > 0 and len(iter_moves) > 0:
-        stacks_of_bags.append([bag["id"] for bag in bags])
+        stacks_of_bags.insert(0, [bag["id"] for bag in bags])
         stack_of_moves.append(iter_moves)
 
         bags, iter_moves = get_iteration_state(restricted_zones)
 
+    if with_output:
+        save_map_images(stack_of_moves, restricted_zones)
+
     total_moves = []
     for moves in stack_of_moves:
         total_moves += moves
-
-    print("len(total_moves)", len(total_moves))
-
-    return
 
     res = send_route({
         "mapID": MAP_ID,
@@ -226,4 +240,10 @@ if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "check":
         check_round_status(sys.argv[2])
     else:
-        main()
+        is_output = False
+        try:
+            is_output = sys.argv[1] == "output"
+        except IndexError:
+            pass
+        finally:
+            main(with_output=is_output)
