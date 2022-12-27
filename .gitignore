@@ -239,12 +239,12 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
-stage_1/map_states/*
-stage_1/images/*
-stage_1/images_small/*
-stage_1/responses/*
-stage_1/map.json
-stage_1/map.png
-stage_1/map.mp4
+*/map_states/*
+*/images/*
+*/images_small/*
+*/responses/*
+map.json
+map.png
+map.mp4
 
 !.gitkeep
