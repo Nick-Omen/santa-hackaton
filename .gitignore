@@ -247,4 +247,6 @@ map.json
 map.png
 map.mp4
 
+.DS_Store
+
 !.gitkeep
